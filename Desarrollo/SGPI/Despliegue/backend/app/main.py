@@ -39,6 +39,11 @@ from api.routes import router as cmepdf_router  # noqa: E402
 
 sys.path.pop(0)
 
+# Importar rutas de CMEPDF añadiéndolo temporalmente al sys.path por nombre de carpeta
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "SGPI-CMEPDF"))
+from api.routes import router as cmepdf_router
+sys.path.pop(0)
+
 
 # ---------------------------------------------------------------------------
 # Middleware de Correlation ID para rastreo de peticiones
