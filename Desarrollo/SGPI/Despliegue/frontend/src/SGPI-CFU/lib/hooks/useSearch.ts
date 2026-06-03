@@ -28,7 +28,7 @@ import { ApiClientError }                               from '../api/client';
 const DEBOUNCE_MS = 400;
 
 /** Longitud mínima del término de búsqueda para disparar la petición */
-const MIN_QUERY_LENGTH = 2;
+const MIN_QUERY_LENGTH = 3;
 
 /** Número de resultados por página */
 const DEFAULT_LIMIT = 20;
@@ -75,30 +75,26 @@ export interface SearchState {
 
 /**
  * Hook de búsqueda global del SGPI.
- *
- * @example
- * const { query, setQuery, results, isLoading, error, pagination, nextPage, type, setType } = useSearch();
- *
- * return (
- *   <>
- *     <input value={query} onChange={(e) => setQuery(e.target.value)} />
- *     {results.map(r => <SearchResultItem key={r.id} result={r} />)}
- *     <button onClick={pagination.hasPrev ? prevPage : undefined}>Anterior</button>
- *     <button onClick={pagination.hasNext ? nextPage : undefined}>Siguiente</button>
- *   </>
- * );
  */
 export function useSearch() {
   // ──────────────────────────────────────────────────────────────────────────
   // Estado
   // ──────────────────────────────────────────────────────────────────────────
 
-  const [query,     setQueryState] = useState<string>('');
-  const [type,      setTypeState]  = useState<SearchType | undefined>(undefined);
-  const [page,      setPage]       = useState<number>(1);
-  const [results,   setResults]    = useState<SearchResult[]>([]);
-  const [isLoading, setIsLoading]  = useState<boolean>(false);
-  const [error,     setError]      = useState<string | null>(null);
+  const [query,      setQueryState]    = useState<string>('');
+  const [types,      setTypesState]    = useState<SearchType[]>([]);
+  const [page,       setPage]          = useState<number>(1);
+  const [results,    setResults]       = useState<SearchResult[]>([]);
+  const [counts,     setCounts]        = useState<Record<string, number> | undefined>(undefined);
+  const [isLoading,  setIsLoading]     = useState<boolean>(false);
+  const [error,      setError]         = useState<string | null>(null);
+
+  // Filtros avanzados
+  const [sources,    setSourcesState]  = useState<string[]>([]);
+  const [statuses,   setStatusesState] = useState<string[]>([]);
+  const [yearStart,  setYearStartState] = useState<number | undefined>(undefined);
+  const [yearEnd,    setYearEndState]   = useState<number | undefined>(undefined);
+
   const [pagination, setPagination] = useState<SearchPagination>({
     page:    1,
     total:   0,
@@ -119,12 +115,17 @@ export function useSearch() {
 
   const performSearch = useCallback(async (
     searchQuery: string,
-    searchType:  SearchType | undefined,
-    searchPage:  number
+    searchTypes: SearchType[],
+    searchPage:  number,
+    searchSources: string[],
+    searchStatuses: string[],
+    searchYearStart: number | undefined,
+    searchYearEnd: number | undefined
   ) => {
     // Validar longitud mínima
     if (searchQuery.trim().length < MIN_QUERY_LENGTH) {
       setResults([]);
+      setCounts(undefined);
       setIsLoading(false);
       setPagination({
         page: 1, total: 0, pages: 1, limit: DEFAULT_LIMIT,
@@ -148,14 +149,32 @@ export function useSearch() {
       page:  String(searchPage),
       limit: String(DEFAULT_LIMIT),
     });
-    if (searchType) params.append('type', searchType);
+    
+    if (searchTypes && searchTypes.length > 0) {
+      searchTypes.forEach(t => params.append('type', t));
+    }
+    
+    // Filtros avanzados
+    if (searchSources && searchSources.length > 0) {
+      searchSources.forEach(src => params.append('source', src));
+    }
+    if (searchStatuses && searchStatuses.length > 0) {
+      searchStatuses.forEach(st => params.append('status', st));
+    }
+    if (searchYearStart !== undefined) {
+      params.append('anio_inicio', String(searchYearStart));
+    }
+    if (searchYearEnd !== undefined) {
+      params.append('anio_fin', String(searchYearEnd));
+    }
 
     try {
-      const data = await apiClient.get<PaginatedData<SearchResult>>(
+      const data = await apiClient.get<PaginatedData<SearchResult> & { counts?: Record<string, number> }>(
         `/search?${params.toString()}`
       );
 
       setResults(data.items);
+      setCounts(data.counts);
       setPagination({
         page:    data.page,
         total:   data.total,
@@ -177,6 +196,7 @@ export function useSearch() {
 
       setError(message);
       setResults([]);
+      setCounts(undefined);
     } finally {
       setIsLoading(false);
     }
@@ -195,6 +215,7 @@ export function useSearch() {
     // Si el query está vacío, limpiar resultados inmediatamente
     if (!query.trim() || query.trim().length < MIN_QUERY_LENGTH) {
       setResults([]);
+      setCounts(undefined);
       setIsLoading(false);
       setError(null);
       setPagination({
@@ -206,7 +227,7 @@ export function useSearch() {
 
     // Programar la búsqueda con debounce
     debounceTimerRef.current = setTimeout(() => {
-      performSearch(query, type, page);
+      performSearch(query, types, page, sources, statuses, yearStart, yearEnd);
     }, DEBOUNCE_MS);
 
     return () => {
@@ -214,7 +235,7 @@ export function useSearch() {
         clearTimeout(debounceTimerRef.current);
       }
     };
-  }, [query, type, page, performSearch]);
+  }, [query, types, page, sources, statuses, yearStart, yearEnd, performSearch]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // Setters con reset de página
@@ -231,9 +252,48 @@ export function useSearch() {
   /**
    * Actualiza el filtro de tipo de entidad y resetea a la página 1.
    */
+  const setTypes = useCallback((newTypes: SearchType[]) => {
+    setTypesState(newTypes);
+    setPage(1);
+  }, []);
+
+  // Backwards compatibility for single type
+  const type = types[0] || undefined;
   const setType = useCallback((newType: SearchType | undefined) => {
-    setTypeState(newType);
+    setTypesState(newType ? [newType] : []);
     setPage(1); // Resetear a la primera página al cambiar el filtro
+  }, []);
+
+  /**
+   * Actualiza las fuentes y resetea a la página 1.
+   */
+  const setSources = useCallback((newSources: string[]) => {
+    setSourcesState(newSources);
+    setPage(1);
+  }, []);
+
+  /**
+   * Actualiza los estados y resetea a la página 1.
+   */
+  const setStatuses = useCallback((newStatuses: string[]) => {
+    setStatusesState(newStatuses);
+    setPage(1);
+  }, []);
+
+  /**
+   * Actualiza el año inicial y resetea a la página 1.
+   */
+  const setYearStart = useCallback((newYearStart: number | undefined) => {
+    setYearStartState(newYearStart);
+    setPage(1);
+  }, []);
+
+  /**
+   * Actualiza el año final y resetea a la página 1.
+   */
+  const setYearEnd = useCallback((newYearEnd: number | undefined) => {
+    setYearEndState(newYearEnd);
+    setPage(1);
   }, []);
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -267,9 +327,14 @@ export function useSearch() {
     if (abortControllerRef.current)  abortControllerRef.current.abort();
 
     setQueryState('');
-    setTypeState(undefined);
+    setTypesState([]);
+    setSourcesState([]);
+    setStatusesState([]);
+    setYearStartState(undefined);
+    setYearEndState(undefined);
     setPage(1);
     setResults([]);
+    setCounts(undefined);
     setIsLoading(false);
     setError(null);
     setPagination({
@@ -292,16 +357,29 @@ export function useSearch() {
     // Estado
     query,
     type,
+    types,
     results,
+    counts,
     isLoading,
     error,
     pagination,
     isEmpty,
     isBlank,
 
+    // Filtros
+    sources,
+    statuses,
+    yearStart,
+    yearEnd,
+
     // Setters
     setQuery,
     setType,
+    setTypes,
+    setSources,
+    setStatuses,
+    setYearStart,
+    setYearEnd,
 
     // Navegación
     nextPage,

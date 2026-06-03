@@ -95,7 +95,7 @@ export default function ExpedienteDigitalPage() {
     setSearchError(null);
     
     let defaultQuery = '';
-    const tesista = proyecto?.miembros?.find(m => m.rol === 'Tesista vinculado' || m.rol === 'Tesista');
+    const tesista = proyecto?.miembros?.find(m => (m.rol as string) === 'Tesista vinculado' || (m.rol as string) === 'Tesista');
     if (tesista) {
       defaultQuery = tesista.nombre;
     } else {

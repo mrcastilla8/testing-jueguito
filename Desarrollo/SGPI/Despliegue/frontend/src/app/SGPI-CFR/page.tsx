@@ -766,6 +766,7 @@ function VistaResultados({
           <ExportButton 
             context={getExportContext(result.params.tipo)} 
             label="Exportar" 
+            result={result}
           />
 
           {/* Guardar snapshot */}

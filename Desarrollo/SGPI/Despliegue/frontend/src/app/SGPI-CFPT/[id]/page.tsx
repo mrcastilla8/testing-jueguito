@@ -709,9 +709,9 @@ function VistaValidada({ prod, onVolver }: { prod: RegistroProduccion; onVolver:
                     <p className="font-sans text-[13px] text-on-surface-variant">Sin grupo vinculado.</p>
                   )
                 ) : (
-                  prod.investigadoresVinculados.length > 0 ? (
+                  (prod.investigadoresVinculados || []).length > 0 ? (
                     <div className="flex flex-wrap gap-2">
-                      {prod.investigadoresVinculados.map((v) => (
+                      {(prod.investigadoresVinculados || []).map((v) => (
                         <span key={v.investigador.id} className="flex items-center gap-1.5 font-sans text-[13px] text-[#166534]">
                           <span className="w-4 h-4 flex items-center justify-center rounded-full bg-[#dcfce7]">
                             <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
@@ -789,7 +789,7 @@ function VistaValidada({ prod, onVolver }: { prod: RegistroProduccion; onVolver:
               )}
 
               {/* Indicadores Tesis */}
-              {prod.tipo === 'tesis' && prod.investigadoresVinculados.map((v) => (
+              {prod.tipo === 'tesis' && (prod.investigadoresVinculados || []).map((v) => (
                 <div key={`carga-${v.investigador.id}`}
                   className="flex items-center gap-3 p-3 rounded border border-outline-variant hover:bg-surface-container-low transition-colors">
                   <span className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full bg-[#dbeafe] text-[#1d4ed8]">
@@ -806,7 +806,7 @@ function VistaValidada({ prod, onVolver }: { prod: RegistroProduccion; onVolver:
                 </div>
               ))}
 
-              {((prod.tipo === 'tesis' && prod.investigadoresVinculados.length === 0) || (prod.tipo === 'articulo' && !prod.grupoVinculado)) && (
+              {((prod.tipo === 'tesis' && (!prod.investigadoresVinculados || prod.investigadoresVinculados.length === 0)) || (prod.tipo === 'articulo' && !prod.grupoVinculado)) && (
                 <p className="font-sans text-[13px] text-on-surface-variant text-center py-2">
                   Sin impacto calculado (no hay vinculación).
                 </p>

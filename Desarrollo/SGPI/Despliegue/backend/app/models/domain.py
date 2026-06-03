@@ -137,6 +137,8 @@ class Convocatoria(Base):
     estado_convocatoria = Column(String(50), default='Abierta')
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+    evidencias = relationship("EvidenciaDifusion", backref="convocatoria", cascade="all, delete-orphan", lazy="selectin")
+
 class Publicacion(Base):
     __tablename__ = 'publicacion'
     id_publicacion = Column(Integer, primary_key=True, autoincrement=True)

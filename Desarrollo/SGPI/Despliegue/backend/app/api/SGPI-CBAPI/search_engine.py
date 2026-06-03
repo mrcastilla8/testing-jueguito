@@ -6,6 +6,7 @@ from datetime import datetime, date
 
 from app.models.domain import Investigador, Proyecto, GrupoInvestigacion, Publicacion, Tesis
 from .schemas import SearchRequest, UnifiedSearchItem, SearchResponse
+from app.core.logger import logger
 
 class SearchEngine:
     @staticmethod
@@ -89,6 +90,10 @@ class SearchEngine:
         return "0000-00-00"
 
     async def search(self, db: AsyncSession, req: SearchRequest) -> SearchResponse:
+        logger.info(
+            f"SearchEngine.search: Iniciando motor de búsqueda "
+            f"para query='{req.q}'"
+        )
         q_term = f"%{req.q}%"
         results: List[UnifiedSearchItem] = []
         
@@ -114,7 +119,13 @@ class SearchEngine:
                 stmt = stmt.where(Investigador.estado_vigencia.in_(req.status))
                 
             db_res = await db.execute(stmt)
-            for inv in db_res.scalars().all():
+            raw_invs = db_res.scalars().all()
+            logger.info(
+                f"SearchEngine: Investigadores BD retornó {len(raw_invs)} "
+                f"registros para query '{req.q}'"
+            )
+            inv_added = 0
+            for inv in raw_invs:
                 src = self._deduce_source_investigador(inv)
                 # Filter by source
                 if req.source and src not in req.source:
@@ -146,6 +157,11 @@ class SearchEngine:
                         "is_external": inv.is_external
                     }
                 ))
+                inv_added += 1
+            logger.info(
+                f"SearchEngine: Investigadores filtrados - "
+                f"Agregados: {inv_added}/{len(raw_invs)}"
+            )
 
         # 2. Query Proyectos
         if "Proyecto" in categories_to_query:
@@ -181,7 +197,13 @@ class SearchEngine:
                 )
                 
             db_res = await db.execute(stmt)
-            for proj in db_res.scalars().all():
+            raw_projs = db_res.scalars().all()
+            logger.info(
+                f"SearchEngine: Proyectos BD retornó {len(raw_projs)} "
+                f"registros para query '{req.q}'"
+            )
+            proj_added = 0
+            for proj in raw_projs:
                 src = self._deduce_source_proyecto(proj)
                 if req.source and src not in req.source:
                     continue
@@ -203,6 +225,11 @@ class SearchEngine:
                         "anio_convocatoria": proj.anio_convocatoria
                     }
                 ))
+                proj_added += 1
+            logger.info(
+                f"SearchEngine: Proyectos filtrados - "
+                f"Agregados: {proj_added}/{len(raw_projs)}"
+            )
 
         # 3. Query Grupos de Investigacion
         if "Grupo" in categories_to_query:
@@ -226,7 +253,13 @@ class SearchEngine:
                 stmt = stmt.where(extract('year', GrupoInvestigacion.fecha_reconocimiento) <= req.anio_fin)
                 
             db_res = await db.execute(stmt)
-            for grupo in db_res.scalars().all():
+            raw_grupos = db_res.scalars().all()
+            logger.info(
+                f"SearchEngine: Grupos BD retornó {len(raw_grupos)} "
+                f"registros para query '{req.q}'"
+            )
+            grupo_added = 0
+            for grupo in raw_grupos:
                 src = self._deduce_source_grupo(grupo)
                 if req.source and src not in req.source:
                     continue
@@ -247,6 +280,11 @@ class SearchEngine:
                         "lineas_investigacion": grupo.lineas_investigacion
                     }
                 ))
+                grupo_added += 1
+            logger.info(
+                f"SearchEngine: Grupos filtrados - "
+                f"Agregados: {grupo_added}/{len(raw_grupos)}"
+            )
 
         # 4. Query Publicaciones
         if "Publicacion" in categories_to_query:
@@ -274,7 +312,13 @@ class SearchEngine:
                 stmt = stmt.where(extract('year', Publicacion.fecha_publicacion) <= req.anio_fin)
                 
             db_res = await db.execute(stmt)
-            for pub in db_res.scalars().all():
+            raw_pubs = db_res.scalars().all()
+            logger.info(
+                f"SearchEngine: Publicaciones BD retornó {len(raw_pubs)} "
+                f"registros para query '{req.q}'"
+            )
+            pub_added = 0
+            for pub in raw_pubs:
                 src = self._deduce_source_publicacion(pub)
                 if req.source and src not in req.source:
                     continue
@@ -297,6 +341,11 @@ class SearchEngine:
                         "indexacion": pub.indexacion
                     }
                 ))
+                pub_added += 1
+            logger.info(
+                f"SearchEngine: Publicaciones filtradas - "
+                f"Agregados: {pub_added}/{len(raw_pubs)}"
+            )
 
         # 5. Query Tesis
         if "Tesis" in categories_to_query:
@@ -318,7 +367,13 @@ class SearchEngine:
                 stmt = stmt.where(Tesis.anio_publicacion <= req.anio_fin)
                 
             db_res = await db.execute(stmt)
-            for tesis in db_res.scalars().all():
+            raw_tesis = db_res.scalars().all()
+            logger.info(
+                f"SearchEngine: Tesis BD retornó {len(raw_tesis)} "
+                f"registros para query '{req.q}'"
+            )
+            tesis_added = 0
+            for tesis in raw_tesis:
                 src = self._deduce_source_tesis(tesis)
                 if req.source and src not in req.source:
                     continue
@@ -341,6 +396,11 @@ class SearchEngine:
                         "url_cybertesis": tesis.url_cybertesis
                     }
                 ))
+                tesis_added += 1
+            logger.info(
+                f"SearchEngine: Tesis filtradas - "
+                f"Agregados: {tesis_added}/{len(raw_tesis)}"
+            )
 
         # --- Relevance & Sorting ---
         # If sort_by is relevance, calculate and sort by relevance score
@@ -361,6 +421,18 @@ class SearchEngine:
         page = req.page
         total_pages = (total_results + limit - 1) // limit if total_results > 0 else 0
         
+        # Calculate counts per category on the filtered results
+        category_counts = {
+            "Investigador": 0,
+            "Proyecto": 0,
+            "Grupo": 0,
+            "Publicacion": 0,
+            "Tesis": 0
+        }
+        for item in results:
+            if item.category in category_counts:
+                category_counts[item.category] += 1
+
         start_idx = (page - 1) * limit
         end_idx = start_idx + limit
         paginated_results = results[start_idx:end_idx]
@@ -370,5 +442,6 @@ class SearchEngine:
             page=page,
             limit=limit,
             total_pages=total_pages,
-            results=paginated_results
+            results=paginated_results,
+            category_counts=category_counts
         )

@@ -28,3 +28,5 @@ class SearchResponse(BaseModel):
     limit: int = Field(..., description="Items per page limit")
     total_pages: int = Field(..., description="Total pages of results")
     results: List[UnifiedSearchItem] = Field(..., description="List of paginated results")
+    category_counts: Optional[Dict[str, int]] = Field(default=None, description="Counts of matching records per category")
+
