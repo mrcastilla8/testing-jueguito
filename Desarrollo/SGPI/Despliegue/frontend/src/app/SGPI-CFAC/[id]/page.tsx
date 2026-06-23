@@ -21,6 +21,7 @@ import React, {
 } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { MainLayout }           from '@/SGPI-CFU/components/layout';
+import { supabase } from '@/SGPI-CFU/lib/supabase';
 import type { Convocatoria, Evidencia } from '../_data/types';
 import {
   getConvocatoriaById,
@@ -575,9 +576,26 @@ export default function ConvocatoriaDetailPage() {
                 <button
                   className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors"
                   aria-label={`Descargar ${ev.fileName}`}
-                  onClick={() => {
-                    /* TODO: GET /api/v1/evidencias/{ev.id}/download */
-                    alert(`Descarga: ${ev.fileName} (disponible con backend real)`);
+                  onClick={async () => {
+                    try {
+                      if (!ev.urlArchivo || ev.urlArchivo.startsWith('local://')) {
+                        alert(`Descarga: ${ev.fileName} (archivo local simulado)`);
+                        return;
+                      }
+                      
+                      const { data, error } = await supabase.storage.from('evidencias').download(ev.urlArchivo);
+                      if (error) throw error;
+                      
+                      const url = URL.createObjectURL(data);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = ev.fileName;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    } catch (err) {
+                      console.error('Error al descargar:', err);
+                      alert('Error al descargar la evidencia.');
+                    }
                   }}
                 >
                   <DownloadIcon />

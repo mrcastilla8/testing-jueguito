@@ -1,3 +1,5 @@
+import { apiClient } from '../../../SGPI-CFU/lib/api/client';
+
 export interface LogEntry {
   id: string;
   fechaHora: string; // ISO 8601
@@ -36,44 +38,29 @@ export interface UsuarioCreate {
   estado_cuenta?: boolean;
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
 export const capiacService = {
   // Configuración
   async getConfiguraciones(): Promise<ConfiguracionResponse[]> {
-    const res = await fetch(`${API_BASE_URL}/api/v1/configuracion`, {
-      headers: {
-        // 'Authorization': `Bearer ${token}` // TODO: Add if auth is required
-      }
-    });
-    if (!res.ok) throw new Error('Error al obtener configuraciones');
-    return res.json();
+    return apiClient.get<ConfiguracionResponse[]>('/configuracion');
   },
 
   async updateConfiguracion(clave: string, valor: any, descripcion?: string): Promise<ConfiguracionResponse> {
-    const res = await fetch(`${API_BASE_URL}/api/v1/configuracion/${clave}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ valor, descripcion }),
-    });
-    if (!res.ok) throw new Error(`Error al actualizar la configuración ${clave}`);
-    return res.json();
+    return apiClient.put<ConfiguracionResponse>(`/configuracion/${clave}`, { valor, descripcion });
   },
 
   // Logs
   async getLogsAuditoria(params?: GetLogsParams): Promise<LogEntry[]> {
-    const url = new URL(`${API_BASE_URL}/api/v1/logs`);
-    if (params?.tipo_evento) url.searchParams.append('tipo_evento', params.tipo_evento);
-    if (params?.fecha_inicio) url.searchParams.append('fecha_inicio', params.fecha_inicio);
-    if (params?.fecha_fin) url.searchParams.append('fecha_fin', params.fecha_fin);
-    if (params?.skip !== undefined) url.searchParams.append('skip', params.skip.toString());
-    if (params?.limit !== undefined) url.searchParams.append('limit', params.limit.toString());
+    const searchParams = new URLSearchParams();
+    if (params?.tipo_evento) searchParams.append('tipo_evento', params.tipo_evento);
+    if (params?.fecha_inicio) searchParams.append('fecha_inicio', params.fecha_inicio);
+    if (params?.fecha_fin) searchParams.append('fecha_fin', params.fecha_fin);
+    if (params?.skip !== undefined) searchParams.append('skip', params.skip.toString());
+    if (params?.limit !== undefined) searchParams.append('limit', params.limit.toString());
 
-    const res = await fetch(url.toString());
-    if (!res.ok) throw new Error('Error al obtener logs');
-    const data = await res.json();
+    const queryString = searchParams.toString();
+    const path = queryString ? `/logs?${queryString}` : '/logs';
+    
+    const data = await apiClient.get<any[]>(path);
 
     // Map backend model to frontend model
     return data.map((log: any): LogEntry => ({
@@ -96,38 +83,14 @@ export const capiacService = {
 
   // Usuarios
   async getUsuarios(): Promise<UsuarioResponse[]> {
-    const res = await fetch(`${API_BASE_URL}/api/v1/usuarios`, {
-      headers: {
-        // 'Authorization': `Bearer ${token}`
-      }
-    });
-    if (!res.ok) throw new Error('Error al obtener usuarios');
-    return res.json();
+    return apiClient.get<UsuarioResponse[]>('/usuarios');
   },
 
   async createUsuario(data: UsuarioCreate): Promise<UsuarioResponse> {
-    const res = await fetch(`${API_BASE_URL}/api/v1/usuarios`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => null);
-      throw new Error(errorData?.detail || 'Error al crear usuario');
-    }
-    return res.json();
+    return apiClient.post<UsuarioResponse>('/usuarios', data);
   },
 
   async toggleEstadoUsuario(idUsuario: string, isActive: boolean): Promise<UsuarioResponse> {
-    const url = new URL(`${API_BASE_URL}/api/v1/usuarios/${idUsuario}/estado`);
-    url.searchParams.append('is_active', isActive.toString());
-    
-    const res = await fetch(url.toString(), {
-      method: 'PATCH',
-    });
-    if (!res.ok) throw new Error('Error al actualizar estado del usuario');
-    return res.json();
+    return apiClient.patch<UsuarioResponse>(`/usuarios/${idUsuario}/estado?is_active=${isActive}`);
   }
 };

@@ -30,6 +30,7 @@ export interface Evidencia {
   descripcion: string;
   fechaCarga:  string;   // ISO date
   cargadoPor:  string;
+  urlArchivo?: string;
 }
 
 export interface Convocatoria {

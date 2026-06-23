@@ -23,6 +23,7 @@ import { MainLayout } from '@/SGPI-CFU/components/layout';
 import type { NivelRenacyt } from '../_data/types';
 import { crearDocente, validarDNI } from '../_data/service';
 import { DEPARTAMENTOS, NIVELES_RENACYT } from '../_data/mock';
+import { useAuth } from '@/SGPI-CFU/lib/hooks/useAuth';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Íconos
@@ -250,11 +251,13 @@ function ConfirmModal({
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Niveles mostrados en la grilla (4 visibles en la imagen)
-const NIVELES_GRILLA: NivelRenacyt[] = ['NIVEL VII', 'NIVEL VI', 'NIVEL V', 'NIVEL IV', 'NIVEL III', 'NIVEL II', 'NIVEL I', 'DISTINGUIDO'];
+const NIVELES_GRILLA: NivelRenacyt[] = ['VII', 'VI', 'V', 'IV', 'III', 'II', 'I', 'DISTINGUIDO'];
 
 function NuevoDocentePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const dniParam = searchParams.get('dni') || '';
   const nombresParam = searchParams.get('nombres') || '';
@@ -268,7 +271,7 @@ function NuevoDocentePageContent() {
   const [email,           setEmail]           = useState('');
   const [telefono,        setTelefono]        = useState('');
   const [departamento,    setDepartamento]    = useState('');
-  const [nivelSeleccionado, setNivelSeleccionado] = useState<NivelRenacyt>('NIVEL IV');
+  const [nivelSeleccionado, setNivelSeleccionado] = useState<NivelRenacyt>('IV');
   const [esSM,            setEsSM]            = useState(true);
   const [puntajeInicial,  setPuntajeInicial]  = useState('0.00');
   const [publicaciones,   setPublicaciones]   = useState('0');
@@ -354,6 +357,20 @@ function NuevoDocentePageContent() {
   // ─────────────────────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────────────────────
+
+  if (!isAdmin) {
+    return (
+      <MainLayout title="Sistema de Gestión de Proyectos de Investigación">
+        <div className="text-center py-20">
+          <p className="font-sans font-semibold text-[14px] text-[#dc2626] mb-2">Acceso Denegado. Solo administradores pueden registrar nuevos investigadores.</p>
+          <button onClick={() => router.push('/SGPI-CFMH')}
+            className="font-sans text-[13px] text-[#001631] hover:underline font-bold">
+            Volver al directorio
+          </button>
+        </div>
+      </MainLayout>
+    );
+  }
 
   return (
     <MainLayout title="Sistema de Gestión de Proyectos de Investigación">
@@ -506,7 +523,7 @@ function NuevoDocentePageContent() {
                           </svg>
                         )}
                       </span>
-                      {n}
+                      {['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'].includes(n) ? `Nivel ${n}` : n}
                     </button>
                   );
                 })}

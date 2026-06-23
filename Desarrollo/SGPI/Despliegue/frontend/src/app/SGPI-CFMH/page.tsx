@@ -18,19 +18,20 @@ import type { DocenteInvestigador, FiltrosDocentes, EstadoVigencia } from './_da
 import { getDocentes, getStats, type PaginatedDocentes } from './_data/service';
 import type { StatsDocentes } from './_data/types';
 import { DEPARTAMENTOS, NIVELES_RENACYT } from './_data/mock';
+import { useAuth } from '@/SGPI-CFU/lib/hooks/useAuth';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuración visual
 // ─────────────────────────────────────────────────────────────────────────────
 
 const NIVEL_CONFIG: Record<string, { bg: string; text: string }> = {
-  'NIVEL I':     { bg: 'bg-[#f1f5f9]',  text: 'text-[#475569]' },
-  'NIVEL II':    { bg: 'bg-[#dbeafe]',  text: 'text-[#1e40af]' },
-  'NIVEL III':   { bg: 'bg-[#ede9fe]',  text: 'text-[#6d28d9]' },
-  'NIVEL IV':    { bg: 'bg-[#fce7f3]',  text: 'text-[#9d174d]' },
-  'NIVEL V':     { bg: 'bg-[#d1fae5]',  text: 'text-[#065f46]' },
-  'NIVEL VI':    { bg: 'bg-[#fef9c3]',  text: 'text-[#854d0e]' },
-  'NIVEL VII':   { bg: 'bg-[#fee2e2]',  text: 'text-[#991b1b]' },
+  'I':           { bg: 'bg-[#f1f5f9]',  text: 'text-[#475569]' },
+  'II':          { bg: 'bg-[#dbeafe]',  text: 'text-[#1e40af]' },
+  'III':         { bg: 'bg-[#ede9fe]',  text: 'text-[#6d28d9]' },
+  'IV':          { bg: 'bg-[#fce7f3]',  text: 'text-[#9d174d]' },
+  'V':           { bg: 'bg-[#d1fae5]',  text: 'text-[#065f46]' },
+  'VI':          { bg: 'bg-[#fef9c3]',  text: 'text-[#854d0e]' },
+  'VII':         { bg: 'bg-[#fee2e2]',  text: 'text-[#991b1b]' },
   'DISTINGUIDO': { bg: 'bg-[#0f172a]',  text: 'text-white' },
   'Sin nivel':   { bg: 'bg-[#f8fafc]',  text: 'text-[#94a3b8]' },
 };
@@ -120,13 +121,14 @@ const GraduateIcon = () => (
 
 function NivelBadge({ nivel }: { nivel: string }) {
   const cfg = NIVEL_CONFIG[nivel] ?? NIVEL_CONFIG['Sin nivel'];
+  const label = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'].includes(nivel) ? `Nivel ${nivel}` : nivel;
   return (
     <span className={`
       inline-flex items-center px-2.5 py-1 rounded
       font-sans font-bold text-[10px] uppercase tracking-wider whitespace-nowrap
       ${cfg.bg} ${cfg.text}
     `}>
-      {nivel}
+      {label}
     </span>
   );
 }
@@ -241,6 +243,8 @@ function Pagination({ page, pages, onChange }: {
 
 export default function DocentesDirectorioPage() {
   const router = useRouter();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const [filtros,     setFiltros]     = useState<FiltrosDocentes>(DEFAULT_FILTROS);
   const [tempBuscar,  setTempBuscar]  = useState('');
@@ -302,13 +306,15 @@ export default function DocentesDirectorioPage() {
             Gestione la información y el estado de vigencia de los docentes investigadores.
           </p>
         </div>
-        <button
-          onClick={() => router.push('/SGPI-CFMH/nuevo')}
-          className="flex items-center gap-2 px-4 py-2 rounded font-sans font-semibold text-[13px] text-white bg-[#001631] hover:bg-[#002b54] transition-colors flex-shrink-0"
-          aria-label="Registrar nuevo docente investigador"
-        >
-          <GraduateIcon /> Registrar Docente
-        </button>
+        {isAdmin && (
+          <button
+            onClick={() => router.push('/SGPI-CFMH/nuevo')}
+            className="flex items-center gap-2 px-4 py-2 rounded font-sans font-semibold text-[13px] text-white bg-[#001631] hover:bg-[#002b54] transition-colors flex-shrink-0"
+            aria-label="Registrar nuevo docente investigador"
+          >
+            <GraduateIcon /> Registrar Docente
+          </button>
+        )}
       </div>
 
       {/* ── Filtros ─────────────────────────────────────────────────────────── */}
@@ -359,7 +365,10 @@ export default function DocentesDirectorioPage() {
             <Select id="filtro-nivel" label="Nivel Renacyt" value={tempNivel} onChange={setTempNivel}
               options={[
                 { value: '', label: 'Todos' },
-                ...NIVELES_RENACYT.map((n) => ({ value: n, label: n })),
+                ...NIVELES_RENACYT.map((n) => ({
+                  value: n,
+                  label: ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'].includes(n) ? `Nivel ${n}` : n
+                })),
               ]}
             />
           </div>
@@ -419,7 +428,7 @@ export default function DocentesDirectorioPage() {
                 </thead>
                 <tbody className="divide-y divide-outline-variant">
                   {resultado.items.map((doc) => (
-                    <DocenteRow key={doc.id} doc={doc}
+                    <DocenteRow key={doc.id} doc={doc} isAdmin={isAdmin}
                       onEdit={() => router.push(`/SGPI-CFMH/${doc.id}/editar`)}
                       onView={() => router.push(`/SGPI-CFMH/${doc.id}`)}
                       onImport={() => router.push(`/SGPI-CFMH/nuevo?dni=${doc.dni}&nombres=${encodeURIComponent(doc.nombres)}&apellidos=${encodeURIComponent(doc.apellidos)}&nivelRenacyt=${encodeURIComponent(doc.nivelRenacyt)}`)}
@@ -493,11 +502,12 @@ export default function DocentesDirectorioPage() {
 // Fila de tabla
 // ─────────────────────────────────────────────────────────────────────────────
 
-function DocenteRow({ doc, onEdit, onView, onImport }: {
+function DocenteRow({ doc, onEdit, onView, onImport, isAdmin }: {
   doc: DocenteInvestigador;
   onEdit: () => void;
   onView: () => void;
   onImport: () => void;
+  isAdmin: boolean;
 }) {
   return (
     <tr className={`
@@ -537,16 +547,18 @@ function DocenteRow({ doc, onEdit, onView, onImport }: {
       {/* Acciones */}
       <td className="px-5 py-4">
         {doc.isExternal ? (
-          <button onClick={onImport}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded font-sans font-semibold text-[12px] text-white bg-[#16a34a] hover:bg-[#166534] transition-colors whitespace-nowrap"
-            aria-label={`Importar docente ${doc.apellidos}, ${doc.nombres}`}>
-            <PlusIcon /> Importar
-          </button>
+          isAdmin && (
+            <button onClick={onImport}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded font-sans font-semibold text-[12px] text-white bg-[#16a34a] hover:bg-[#166534] transition-colors whitespace-nowrap"
+              aria-label={`Importar docente ${doc.apellidos}, ${doc.nombres}`}>
+              <PlusIcon /> Importar
+            </button>
+          )
         ) : (
           <button onClick={onView}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded font-sans font-semibold text-[12px] text-on-surface border border-outline-variant hover:bg-surface-container hover:border-[#001631] transition-colors whitespace-nowrap"
             aria-label={`Ver y editar perfil de ${doc.apellidos}, ${doc.nombres}`}>
-            <EditIcon /> Ver / Editar
+            {isAdmin ? <><EditIcon /> Ver / Editar</> : <><EyeIcon /> Ver Detalle</>}
           </button>
         )}
       </td>

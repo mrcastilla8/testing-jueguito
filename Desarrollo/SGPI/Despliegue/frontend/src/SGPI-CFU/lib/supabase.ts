@@ -5,16 +5,18 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholde
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   global: {
-    headers: {
-      get Authorization() {
-        if (typeof window !== 'undefined') {
-          const token = localStorage.getItem('sgpi_access_token');
-          if (token) {
-            return `Bearer ${token}`;
-          }
+    fetch: (url, options) => {
+      const headers = new Headers(options?.headers);
+      if (typeof window !== 'undefined') {
+        const token = localStorage.getItem('sgpi_access_token');
+        if (token) {
+          headers.set('Authorization', `Bearer ${token}`);
         }
-        return `Bearer ${supabaseAnonKey}`;
       }
-    }
-  }
+      return fetch(url, {
+        ...options,
+        headers,
+      });
+    },
+  },
 });

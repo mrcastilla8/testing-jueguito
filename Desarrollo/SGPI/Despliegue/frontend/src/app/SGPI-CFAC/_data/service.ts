@@ -14,6 +14,7 @@
 
 import type { Convocatoria, AlertaFiltros, NivelAlerta, EvidenciaPayload, Evidencia } from './types';
 import { apiClient } from '@/SGPI-CFU/lib/api/client';
+import { supabase } from '@/SGPI-CFU/lib/supabase';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers de semaforización
@@ -66,6 +67,7 @@ export async function getConvocatorias(filtros: AlertaFiltros): Promise<Convocat
       descripcion: e.tipo_evidencia || '',
       fechaCarga: e.fecha_carga,
       cargadoPor: 'Usuario',
+      urlArchivo: e.url_archivo,
     })),
   }));
 
@@ -115,6 +117,7 @@ export async function getConvocatoriaById(id: string): Promise<Convocatoria | nu
         descripcion: e.tipo_evidencia || '',
         fechaCarga: e.fecha_carga,
         cargadoPor: 'Usuario',
+        urlArchivo: e.url_archivo,
       })),
     };
   } catch (error) {
@@ -148,12 +151,25 @@ export function validarEvidencia(file: File): { valid: boolean; error?: string }
 }
 
 export async function subirEvidencia(payload: EvidenciaPayload): Promise<Evidencia> {
-  // Dado que el backend actual espera un JSON con los metadatos y no implementa subida multipart real de momento:
+  // 1. Subir archivo al bucket de Supabase
+  const fileExt = payload.file.name.split('.').pop();
+  const uniqueName = `${payload.convocatoriaId}_${Date.now()}.${fileExt}`;
+  const filePath = `${payload.convocatoriaId}/${uniqueName}`;
+
+  const { data: uploadData, error: uploadError } = await supabase.storage
+    .from('evidencias')
+    .upload(filePath, payload.file);
+
+  if (uploadError) {
+    throw new Error(`Error al subir archivo a Supabase Storage: ${uploadError.message}`);
+  }
+
+  // 2. Registrar el metadato en la API
   const res = await apiClient.post<any>(`/calls/${payload.convocatoriaId}/evidence`, {
     id_convocatoria: parseInt(payload.convocatoriaId),
     tipo_evidencia: payload.descripcion || 'Sin descripción',
     nombre_archivo: payload.file.name,
-    url_archivo: `local://${payload.file.name}`
+    url_archivo: filePath
   });
 
   return {
@@ -162,6 +178,7 @@ export async function subirEvidencia(payload: EvidenciaPayload): Promise<Evidenc
     descripcion: payload.descripcion,
     fechaCarga: res.fecha_carga,
     cargadoPor: 'Usuario Actual',
+    urlArchivo: filePath,
   };
 }
 

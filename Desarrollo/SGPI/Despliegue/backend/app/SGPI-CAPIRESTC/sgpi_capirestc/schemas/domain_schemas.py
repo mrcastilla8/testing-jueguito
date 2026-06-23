@@ -19,6 +19,7 @@ class InvestigadorBase(BaseModel):
     url_cti_vitae: Optional[str] = None
     investigador_sm: Optional[bool] = False
     estado_vigencia: Optional[str] = 'Activo'
+    correo: Optional[str] = None
 
 class InvestigadorCreate(InvestigadorBase):
     pass
@@ -39,6 +40,7 @@ class InvestigadorUpdate(BaseModel):
     estado_vigencia: Optional[str] = None
     tiene_deuda_gi: Optional[bool] = None
     tiene_deuda_pi: Optional[bool] = None
+    correo: Optional[str] = None
 
 class InvestigadorResponse(InvestigadorBase):
     tiene_deuda_gi: bool

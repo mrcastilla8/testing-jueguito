@@ -25,6 +25,7 @@ import { MainLayout } from '@/SGPI-CFU/components/layout';
 import type { DocenteInvestigador, NivelRenacyt, EstadoVigencia } from '../_data/types';
 import { getDocenteById, actualizarDocente } from '../_data/service';
 import { DEPARTAMENTOS, NIVELES_RENACYT } from '../_data/mock';
+import { useAuth } from '@/SGPI-CFU/lib/hooks/useAuth';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Íconos
@@ -78,13 +79,14 @@ const ChevronDown = () => (
   </svg>
 );
 
-function SelectField({ id, value, onChange, options }: {
+function SelectField({ id, value, onChange, options, disabled }: {
   id: string; value: string; onChange: (v: string) => void;
   options: { value: string; label: string }[];
+  disabled?: boolean;
 }) {
   return (
     <div className="relative">
-      <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className={selectCls}>
+      <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className={selectCls} disabled={disabled}>
         {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
       <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-on-surface-variant">
@@ -117,14 +119,16 @@ function SectionCard({ title, children }: { title: string; children: React.React
 // Toggle
 // ─────────────────────────────────────────────────────────────────────────────
 
-function Toggle({ checked, onChange, id }: {
+function Toggle({ checked, onChange, id, disabled }: {
   checked: boolean; onChange: (v: boolean) => void; id: string;
+  disabled?: boolean;
 }) {
   return (
     <button role="switch" aria-checked={checked} id={id}
-      onClick={() => onChange(!checked)}
+      disabled={disabled}
+      onClick={() => !disabled && onChange(!checked)}
       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200
-        ${checked ? 'bg-[#16a34a]' : 'bg-[#d1d5db]'}`}>
+        ${checked ? 'bg-[#16a34a]' : 'bg-[#d1d5db]'} ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}>
       <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform duration-200
         ${checked ? 'translate-x-6' : 'translate-x-1'}`} />
     </button>
@@ -169,6 +173,8 @@ export default function DocentePerfilPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = params?.id ?? '';
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const [doc, setDoc] = useState<DocenteInvestigador | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -350,6 +356,7 @@ export default function DocentePerfilPage() {
                     className={inputCls(hasErr('nombres'))}
                     aria-label="Nombres del docente"
                     aria-invalid={hasErr('nombres')}
+                    readOnly={!isAdmin}
                   />
                 </div>
               </div>
@@ -363,12 +370,14 @@ export default function DocentePerfilPage() {
                     className={inputCls(hasErr('apellidos'))}
                     aria-label="Apellidos del docente"
                     aria-invalid={hasErr('apellidos')}
+                    readOnly={!isAdmin}
                   />
                 </div>
                 <div>
                   <Label text="Departamento Académico" required />
                   <SelectField id="departamento" value={departamento}
                     onChange={setDepartamento}
+                    disabled={!isAdmin}
                     options={[
                       { value: '', label: 'Seleccione...' },
                       ...DEPARTAMENTOS.map((d) => ({ value: d, label: d })),
@@ -386,11 +395,13 @@ export default function DocentePerfilPage() {
                     className={inputCls(hasErr('email'))}
                     aria-label="Correo institucional"
                     aria-invalid={hasErr('email')}
+                    readOnly={!isAdmin}
                   />
                 </div>
                 <div>
                   <Label text="Estado en el Sistema" />
                   <SelectField id="estado" value={estado} onChange={(v) => setEstado(v as EstadoVigencia)}
+                    disabled={!isAdmin}
                     options={[
                       { value: 'activo', label: 'Activo' },
                       { value: 'inactivo', label: 'Inactivo' },
@@ -411,14 +422,18 @@ export default function DocentePerfilPage() {
                 <Label text="Nivel Renacyt Actual" />
                 <SelectField id="nivel-renacyt" value={nivel}
                   onChange={(v) => setNivel(v as NivelRenacyt)}
-                  options={NIVELES_RENACYT.map((n) => ({ value: n, label: n }))}
+                  options={NIVELES_RENACYT.map((n) => ({
+                    value: n,
+                    label: ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'].includes(n) ? `Nivel ${n}` : n
+                  }))}
+                  disabled={!isAdmin}
                 />
               </div>
 
               <div>
                 <Label text="¿Es Investigador San Marcos (RR Nº 02127-R-17)?" />
                 <div className="flex items-center gap-3 mt-1">
-                  <Toggle id="toggle-sm" checked={esSM} onChange={setEsSM} />
+                  <Toggle id="toggle-sm" checked={esSM} onChange={setEsSM} disabled={!isAdmin} />
                   <span className="font-sans font-semibold text-[13px] text-on-surface">
                     {esSM ? 'SÍ' : 'NO'}
                   </span>
@@ -481,10 +496,12 @@ export default function DocentePerfilPage() {
                         }}
                         aria-label={`Puntaje ${h.anio}`}
                         aria-invalid={hasError}
+                        readOnly={!isAdmin}
                         className={`
                         w-[68px] px-2 py-1.5 text-center font-mono text-[13px] rounded outline-none transition-all
                         focus:ring-2
-                        ${isCurrent
+                        ${!isAdmin ? 'bg-surface-container-low border border-outline-variant cursor-not-allowed' : ''}
+                        ${isCurrent && isAdmin
                             ? 'border-2 border-[#001631] text-[#001631] font-bold focus:ring-[#a8c8fa]'
                             : hasError
                               ? 'border border-[#dc2626] bg-[#fff5f5] focus:ring-[#fca5a5]'
@@ -508,28 +525,30 @@ export default function DocentePerfilPage() {
       </div>
 
       {/* ── Barra fija inferior ──────────────────────────────────────────────── */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-end gap-3 px-6 py-4 bg-white border-t border-outline-variant shadow-[0_-2px_8px_rgba(0,0,0,0.06)]">
-        <button onClick={() => router.push('/SGPI-CFMH')}
-          className="px-5 py-2 rounded font-sans font-semibold text-[12px] text-on-surface border border-outline-variant hover:bg-surface-container transition-colors uppercase tracking-wide"
-          aria-label="Cancelar modificaciones">
-          Cancelar Modificaciones
-        </button>
-        <button onClick={handleGuardar} disabled={isSaving}
-          className="flex items-center gap-2 px-6 py-2 rounded font-sans font-semibold text-[12px] text-white bg-[#001631] hover:bg-[#002b54] disabled:opacity-50 transition-colors uppercase tracking-wide"
-          aria-label="Guardar perfil del investigador">
-          {isSaving ? (
-            <>
-              <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-              </svg>
-              Guardando...
-            </>
-          ) : (
-            <><SaveIcon /> Guardar Perfil de Investigador</>
-          )}
-        </button>
-      </div>
+      {isAdmin && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-end gap-3 px-6 py-4 bg-white border-t border-outline-variant shadow-[0_-2px_8px_rgba(0,0,0,0.06)]">
+          <button onClick={() => router.push('/SGPI-CFMH')}
+            className="px-5 py-2 rounded font-sans font-semibold text-[12px] text-on-surface border border-outline-variant hover:bg-surface-container transition-colors uppercase tracking-wide"
+            aria-label="Cancelar modificaciones">
+            Cancelar Modificaciones
+          </button>
+          <button onClick={handleGuardar} disabled={isSaving}
+            className="flex items-center gap-2 px-6 py-2 rounded font-sans font-semibold text-[12px] text-white bg-[#001631] hover:bg-[#002b54] disabled:opacity-50 transition-colors uppercase tracking-wide"
+            aria-label="Guardar perfil del investigador">
+            {isSaving ? (
+              <>
+                <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+                Guardando...
+              </>
+            ) : (
+              <><SaveIcon /> Guardar Perfil de Investigador</>
+            )}
+          </button>
+        </div>
+      )}
 
     </MainLayout>
   );
