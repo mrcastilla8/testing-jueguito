@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, and_
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from pydantic import BaseModel
 import math
@@ -10,12 +11,13 @@ import re
 from datetime import datetime, timezone
 
 from app.db.session import get_db
-from app.models.domain import Investigador
+from app.models.domain import Investigador, HistorialPuntaje
 from app.core.logger import logger
 from sgpi_capirestc.crud.crud_investigador import investigador
-from sgpi_capirestc.schemas.domain_schemas import InvestigadorCreate, InvestigadorUpdate, InvestigadorResponse
+from sgpi_capirestc.schemas.domain_schemas import InvestigadorCreate, InvestigadorUpdate, InvestigadorResponse, HistorialPuntajeInput, HistorialPuntajeResponse
 from app.core.security import get_current_user
 from app.core.audit import log_audit_event
+from app.db.errors import handle_db_integrity_error
 
 # Inyección dinámica para importar el conector RENACYT
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -154,8 +156,8 @@ async def list_investigadores(
                 for word in words:
                     term = f"%{word}%"
                     word_filters.append(or_(
-                        Investigador.apellidos.ilike(term),
-                        Investigador.nombres.ilike(term)
+                        func.unaccent(Investigador.apellidos).ilike(func.unaccent(term)),
+                        func.unaccent(Investigador.nombres).ilike(func.unaccent(term))
                     ))
                 filters.append(and_(*word_filters))
     if departamento:
@@ -281,6 +283,128 @@ async def list_investigadores(
     }
 
 
+class StatsResponse(BaseModel):
+    totalDocentes: int
+    deltaEsteMes: int
+    investigadoresRenacyt: int
+    porcentajeRenacyt: int
+    vigenciasPorVencer: int
+    proyectosActivos: int
+    cicloAcademico: str
+
+@router.get("/stats", response_model=StatsResponse)
+async def get_investigators_stats(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    # Total docentes (excluding is_external)
+    stmt_total = select(func.count(Investigador.dni)).where(or_(Investigador.is_external == False, Investigador.is_external == None))
+    res_total = await db.execute(stmt_total)
+    total = res_total.scalar_one()
+
+    # Investigadores Renacyt (excluding is_external)
+    stmt_renacyt = select(func.count(Investigador.dni)).where(
+        and_(
+            or_(Investigador.is_external == False, Investigador.is_external == None),
+            Investigador.categoria_renacyt != 'No Clasificado',
+            Investigador.categoria_renacyt != 'Sin nivel'
+        )
+    )
+    res_renacyt = await db.execute(stmt_renacyt)
+    renacyt = res_renacyt.scalar_one()
+
+    # Vigencias por vencer (excluding is_external)
+    stmt_vencer = select(func.count(Investigador.dni)).where(
+        and_(
+            or_(Investigador.is_external == False, Investigador.is_external == None),
+            Investigador.estado_vigencia == 'Por Vencer'
+        )
+    )
+    res_vencer = await db.execute(stmt_vencer)
+    vencer = res_vencer.scalar_one()
+
+    # Proyectos activos
+    from app.models.domain import Proyecto
+    stmt_proy = select(func.count(Proyecto.codigo_proyecto)).where(Proyecto.estado_proyecto == 'En ejecución')
+    res_proy = await db.execute(stmt_proy)
+    proyectos_activos = res_proy.scalar_one()
+
+    porcentaje = round((renacyt / total) * 100) if total > 0 else 0
+
+    return {
+        "totalDocentes": total,
+        "deltaEsteMes": 0,
+        "investigadoresRenacyt": renacyt,
+        "porcentajeRenacyt": porcentaje,
+        "vigenciasPorVencer": vencer,
+        "proyectosActivos": proyectos_activos,
+        "cicloAcademico": "2026-I"
+    }
+
+@router.get("/{dni}/exists")
+async def check_dni_exists(
+    dni: str,
+    exclude: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    clean_dni = dni.strip()
+    stmt = select(Investigador.dni).where(Investigador.dni == clean_dni)
+    if exclude:
+        stmt = stmt.where(Investigador.dni != exclude.strip())
+    res = await db.execute(stmt)
+    existing_dni = res.scalar_one_or_none()
+    return {"duplicado": existing_dni is not None, "existenteId": existing_dni}
+
+class ProyectoHistorialResponse(BaseModel):
+    id: str
+    codigo: str
+    titulo: str
+    rol: str
+    anioInicio: int
+    anioFin: Optional[int] = None
+    presupuesto: float
+    entidadFinanciadora: str
+    estado: str
+
+@router.get("/{dni}/projects", response_model=List[ProyectoHistorialResponse])
+async def get_investigator_projects(
+    dni: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    from app.models.domain import InvestigadorProyecto, Proyecto
+    stmt = select(InvestigadorProyecto, Proyecto).join(
+        Proyecto, InvestigadorProyecto.codigo_proyecto == Proyecto.codigo_proyecto
+    ).where(InvestigadorProyecto.dni_investigador == dni)
+    
+    res = await db.execute(stmt)
+    rows = res.all()
+    
+    result = []
+    for inv_proj, proj in rows:
+        fecha_ini = proj.fecha_inicio
+        anio_inicio = fecha_ini.year if fecha_ini else datetime.now().year
+        
+        estado_mapped = 'en_evaluacion'
+        if proj.estado_proyecto == 'En ejecución':
+            estado_mapped = 'en_ejecucion'
+        elif proj.estado_proyecto == 'Concluido':
+            estado_mapped = 'finalizado'
+            
+        result.append({
+            "id": f"{proj.codigo_proyecto}-{dni}",
+            "codigo": proj.codigo_proyecto,
+            "titulo": proj.titulo_proyecto,
+            "rol": inv_proj.condicion_rol,
+            "anioInicio": anio_inicio,
+            "anioFin": None,
+            "presupuesto": float(proj.presupuesto_asignado or 0.0),
+            "entidadFinanciadora": "VRIP-UNMSM",
+            "estado": estado_mapped
+        })
+    return result
+
 @router.get("/{dni}", response_model=InvestigadorResponse)
 async def get_investigador(dni: str, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
     clean_term = dni.strip()
@@ -338,8 +462,8 @@ async def get_investigador(dni: str, db: AsyncSession = Depends(get_db), current
             for word in words:
                 term = f"%{word}%"
                 word_filters.append(or_(
-                    Investigador.apellidos.ilike(term),
-                    Investigador.nombres.ilike(term)
+                    func.unaccent(Investigador.apellidos).ilike(func.unaccent(term)),
+                    func.unaccent(Investigador.nombres).ilike(func.unaccent(term))
                 ))
             stmt = select(Investigador).where(and_(*word_filters)).limit(1)
             result = await db.execute(stmt)
@@ -404,40 +528,132 @@ async def get_investigador(dni: str, db: AsyncSession = Depends(get_db), current
 
 
 @router.post("/", response_model=InvestigadorResponse)
-async def create_investigador(obj_in: InvestigadorCreate, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    inv = await investigador.get_by_dni(db, dni=obj_in.dni)
+async def create_investigador(
+    obj_in: InvestigadorCreate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    inv = await db.get(Investigador, obj_in.dni)
     if inv:
         raise HTTPException(status_code=400, detail="Investigador with this DNI already exists")
     
-    new_inv = await investigador.create(db, obj_in=obj_in)
+    # Extraer historial
+    historial_in = obj_in.historial_puntaje
     
-    await log_audit_event(
-        db=db,
-        tipo_evento="INSERT",
-        entidad_afectada="investigador",
-        pk_entidad=new_inv.dni,
-        valor_nuevo=obj_in.model_dump(),
-        id_usuario=current_user.get("sub"),
-    )
-    return new_inv
+    # Crear modelo de Investigador
+    dump_data = obj_in.model_dump(exclude={"historial_puntaje"})
+    new_inv = Investigador(**dump_data)
+    
+    try:
+        db.add(new_inv)
+        await db.flush() # para asegurarnos de que la FK no falle
+        
+        if historial_in:
+            for hp in historial_in:
+                db_hp = HistorialPuntaje(
+                    dni_investigador=new_inv.dni,
+                    anio_evaluacion=hp.anio_evaluacion,
+                    puntaje_total=hp.puntaje_total,
+                    puntaje_revistas=hp.puntaje_revistas,
+                    puntaje_libros=hp.puntaje_libros,
+                    puntaje_proyectos=hp.puntaje_proyectos,
+                    puntaje_patentes=hp.puntaje_patentes,
+                    puntaje_tesis=hp.puntaje_tesis,
+                    puntaje_otros=hp.puntaje_otros
+                )
+                db.add(db_hp)
+        
+        await db.commit()
+        
+        # Recargar para devolver con la relación lazy selectin cargada
+        await db.refresh(new_inv)
+        
+        background_tasks.add_task(
+            log_audit_event,
+            db=None,
+            tipo_evento="INSERT",
+            entidad_afectada="investigador",
+            pk_entidad=new_inv.dni,
+            valor_nuevo=obj_in.model_dump(),
+            id_usuario=current_user.get("sub") if current_user else None,
+        )
+        return new_inv
+    except IntegrityError as e:
+        await db.rollback()
+        handle_db_integrity_error(e)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error al crear investigador: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"Error al crear investigador: {str(e)}")
 
 @router.put("/{dni}", response_model=InvestigadorResponse)
-async def update_investigador(dni: str, obj_in: InvestigadorUpdate, db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    inv = await investigador.get_by_dni(db, dni=dni)
+async def update_investigador(
+    dni: str,
+    obj_in: InvestigadorUpdate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    inv = await db.get(Investigador, dni)
     if not inv:
         raise HTTPException(status_code=404, detail="Investigador no encontrado")
         
-    valor_anterior = {k: getattr(inv, k) for k in obj_in.model_dump(exclude_unset=True).keys()}
+    valor_anterior = {k: getattr(inv, k) for k in obj_in.model_dump(exclude_unset=True, exclude={"historial_puntaje"}).keys() if hasattr(inv, k)}
     
-    updated_inv = await investigador.update(db, db_obj=inv, obj_in=obj_in)
+    # Extraer historial
+    historial_in = obj_in.historial_puntaje
     
-    await log_audit_event(
-        db=db,
-        tipo_evento="UPDATE",
-        entidad_afectada="investigador",
-        pk_entidad=dni,
-        valor_anterior=valor_anterior,
-        valor_nuevo=obj_in.model_dump(exclude_unset=True),
-        id_usuario=current_user.get("sub"),
-    )
-    return updated_inv
+    # Actualizar campos de Investigador
+    update_data = obj_in.model_dump(exclude_unset=True, exclude={"historial_puntaje"})
+    for field, value in update_data.items():
+        setattr(inv, field, value)
+        
+    try:
+        db.add(inv)
+        
+        # Si se incluye historial_puntaje en la petición (aunque sea lista vacía), sincronizarlo
+        if historial_in is not None:
+            # Eliminar existentes
+            stmt_del = select(HistorialPuntaje).where(HistorialPuntaje.dni_investigador == dni)
+            res_del = await db.execute(stmt_del)
+            for existing_hp in res_del.scalars().all():
+                await db.delete(existing_hp)
+            await db.flush()
+            
+            # Insertar nuevos
+            for hp in historial_in:
+                db_hp = HistorialPuntaje(
+                    dni_investigador=dni,
+                    anio_evaluacion=hp.anio_evaluacion,
+                    puntaje_total=hp.puntaje_total,
+                    puntaje_revistas=hp.puntaje_revistas,
+                    puntaje_libros=hp.puntaje_libros,
+                    puntaje_proyectos=hp.puntaje_proyectos,
+                    puntaje_patentes=hp.puntaje_patentes,
+                    puntaje_tesis=hp.puntaje_tesis,
+                    puntaje_otros=hp.puntaje_otros
+                )
+                db.add(db_hp)
+                
+        await db.commit()
+        await db.refresh(inv)
+        
+        background_tasks.add_task(
+            log_audit_event,
+            db=None,
+            tipo_evento="UPDATE",
+            entidad_afectada="investigador",
+            pk_entidad=dni,
+            valor_anterior=valor_anterior,
+            valor_nuevo=obj_in.model_dump(exclude_unset=True),
+            id_usuario=current_user.get("sub") if current_user else None,
+        )
+        return inv
+    except IntegrityError as e:
+        await db.rollback()
+        handle_db_integrity_error(e)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error al actualizar investigador: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"Error al actualizar investigador: {str(e)}")

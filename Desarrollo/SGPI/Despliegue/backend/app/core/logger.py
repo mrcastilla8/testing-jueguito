@@ -72,6 +72,12 @@ def setup_logging() -> None:
         framework_logger.propagate = True
         framework_logger.setLevel(log_level)
         
+    # 6. Silence watchfiles log loop (watchfiles.main: 1 change detected)
+    # Since watchfiles detects changes in logs/sgpi.log when writing logs,
+    # it generates an infinite loop of "1 change detected" log lines.
+    # We set watchfiles logger level to WARNING to prevent these INFO logs.
+    logging.getLogger("watchfiles").setLevel(logging.WARNING)
+
     logging.info("Centralized logging system initialized successfully.")
 
 # Expose a default system logger

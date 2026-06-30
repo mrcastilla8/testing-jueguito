@@ -2,14 +2,21 @@ import asyncio
 import os
 import sys
 import re
+import unicodedata
 from typing import List, Dict, Any, Optional
-from sqlalchemy import select, or_, and_, extract
+from sqlalchemy import select, or_, and_, extract, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, date
 
 from app.models.domain import Investigador, Proyecto, GrupoInvestigacion, Publicacion, Tesis
 from .schemas import SearchRequest, UnifiedSearchItem, SearchResponse
 from app.core.logger import logger
+
+def remove_accents(s: str) -> str:
+    if not s:
+        return ""
+    return "".join(c for c in unicodedata.normalize('NFKD', s) if not unicodedata.combining(c))
+
 
 # Import dynamic logic for RENACYT connector
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -63,37 +70,37 @@ class SearchEngine:
 
     @staticmethod
     def _calculate_relevance(q: str, item: UnifiedSearchItem) -> int:
-        q_lower = q.lower()
-        title_lower = item.title.lower()
-        id_lower = item.id.lower()
+        q_clean = remove_accents(q.lower())
+        title_clean = remove_accents(item.title.lower())
+        id_clean = remove_accents(item.id.lower())
         
         score = 0
         
         # Match in ID (exact or prefix)
-        if id_lower == q_lower:
+        if id_clean == q_clean:
             score += 100
-        elif id_lower.startswith(q_lower):
+        elif id_clean.startswith(q_clean):
             score += 50
-        elif q_lower in id_lower:
+        elif q_clean in id_clean:
             score += 25
             
         # Match in Title
-        if title_lower == q_lower:
+        if title_clean == q_clean:
             score += 80
-        elif title_lower.startswith(q_lower):
+        elif title_clean.startswith(q_clean):
             score += 40
-        elif q_lower in title_lower:
+        elif q_clean in title_clean:
             score += 20
             
         # Match in specific category or source
-        if q_lower in item.category.lower():
+        if q_clean in remove_accents(item.category.lower()):
             score += 5
-        if q_lower in item.source.lower():
+        if q_clean in remove_accents(item.source.lower()):
             score += 5
             
         # Add points for detailed matches in details dict
         for val in item.details.values():
-            if isinstance(val, str) and q_lower in val.lower():
+            if isinstance(val, str) and q_clean in remove_accents(val.lower()):
                 score += 10
                 
         return score
@@ -198,11 +205,11 @@ class SearchEngine:
                 # Normal database query
                 stmt = select(Investigador).where(
                     or_(
-                        Investigador.nombres.ilike(q_term),
-                        Investigador.apellidos.ilike(q_term),
-                        Investigador.dni.ilike(q_term),
-                        Investigador.departamento_academico.ilike(q_term),
-                        Investigador.codigo_renacyt.ilike(q_term)
+                        func.unaccent(Investigador.nombres).ilike(func.unaccent(q_term)),
+                        func.unaccent(Investigador.apellidos).ilike(func.unaccent(q_term)),
+                        func.unaccent(Investigador.dni).ilike(func.unaccent(q_term)),
+                        func.unaccent(Investigador.departamento_academico).ilike(func.unaccent(q_term)),
+                        func.unaccent(Investigador.codigo_renacyt).ilike(func.unaccent(q_term))
                     )
                 )
                 
@@ -264,12 +271,12 @@ class SearchEngine:
         if "Proyecto" in categories_to_query:
             stmt = select(Proyecto).where(
                 or_(
-                    Proyecto.titulo_proyecto.ilike(q_term),
-                    Proyecto.codigo_proyecto.ilike(q_term),
-                    Proyecto.resolucion_aprobacion.ilike(q_term),
-                    Proyecto.tipo_proyecto.ilike(q_term),
-                    Proyecto.tipo_programa.ilike(q_term),
-                    Proyecto.area_academica.ilike(q_term)
+                    func.unaccent(Proyecto.titulo_proyecto).ilike(func.unaccent(q_term)),
+                    func.unaccent(Proyecto.codigo_proyecto).ilike(func.unaccent(q_term)),
+                    func.unaccent(Proyecto.resolucion_aprobacion).ilike(func.unaccent(q_term)),
+                    func.unaccent(Proyecto.tipo_proyecto).ilike(func.unaccent(q_term)),
+                    func.unaccent(Proyecto.tipo_programa).ilike(func.unaccent(q_term)),
+                    func.unaccent(Proyecto.area_academica).ilike(func.unaccent(q_term))
                 )
             )
             
@@ -332,10 +339,10 @@ class SearchEngine:
         if "Grupo" in categories_to_query:
             stmt = select(GrupoInvestigacion).where(
                 or_(
-                    GrupoInvestigacion.nombre_grupo.ilike(q_term),
-                    GrupoInvestigacion.codigo_grupo.ilike(q_term),
-                    GrupoInvestigacion.siglas.ilike(q_term),
-                    GrupoInvestigacion.descripcion.ilike(q_term)
+                    func.unaccent(GrupoInvestigacion.nombre_grupo).ilike(func.unaccent(q_term)),
+                    func.unaccent(GrupoInvestigacion.codigo_grupo).ilike(func.unaccent(q_term)),
+                    func.unaccent(GrupoInvestigacion.siglas).ilike(func.unaccent(q_term)),
+                    func.unaccent(GrupoInvestigacion.descripcion).ilike(func.unaccent(q_term))
                 )
             )
             
@@ -387,12 +394,12 @@ class SearchEngine:
         if "Publicacion" in categories_to_query:
             stmt = select(Publicacion).where(
                 or_(
-                    Publicacion.titulo_articulo.ilike(q_term),
-                    Publicacion.doi_codigo.ilike(q_term),
-                    Publicacion.issn.ilike(q_term),
-                    Publicacion.nombre_revista.ilike(q_term),
-                    Publicacion.nombre_evento.ilike(q_term),
-                    Publicacion.indexacion.ilike(q_term)
+                    func.unaccent(Publicacion.titulo_articulo).ilike(func.unaccent(q_term)),
+                    func.unaccent(Publicacion.doi_codigo).ilike(func.unaccent(q_term)),
+                    func.unaccent(Publicacion.issn).ilike(func.unaccent(q_term)),
+                    func.unaccent(Publicacion.nombre_revista).ilike(func.unaccent(q_term)),
+                    func.unaccent(Publicacion.nombre_evento).ilike(func.unaccent(q_term)),
+                    func.unaccent(Publicacion.indexacion).ilike(func.unaccent(q_term))
                 )
             )
             
@@ -448,11 +455,11 @@ class SearchEngine:
         if "Tesis" in categories_to_query:
             stmt = select(Tesis).where(
                 or_(
-                    Tesis.titulo_tesis.ilike(q_term),
-                    Tesis.autor_estudiante_texto.ilike(q_term),
-                    Tesis.asesor_texto.ilike(q_term),
-                    Tesis.escuela_profesional.ilike(q_term),
-                    Tesis.grado_obtenido.ilike(q_term)
+                    func.unaccent(Tesis.titulo_tesis).ilike(func.unaccent(q_term)),
+                    func.unaccent(Tesis.autor_estudiante_texto).ilike(func.unaccent(q_term)),
+                    func.unaccent(Tesis.asesor_texto).ilike(func.unaccent(q_term)),
+                    func.unaccent(Tesis.escuela_profesional).ilike(func.unaccent(q_term)),
+                    func.unaccent(Tesis.grado_obtenido).ilike(func.unaccent(q_term))
                 )
             )
             

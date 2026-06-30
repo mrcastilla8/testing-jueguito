@@ -31,17 +31,28 @@ import re
 import unicodedata
 
 class EtlProcessor:
-    def __init__(self, file_path: str):
+    def __init__(self, file_path: str, id_usuario: Optional[str] = None):
         self.file_path = file_path
         self.filename = os.path.basename(file_path)
         self.uploader = SupabaseUploader()
         self.failed_rows: List[Dict[str, Any]] = []
+        self.id_usuario = id_usuario
 
-    async def process(self, upload_to_db: bool = True) -> Dict[str, Any]:
+    async def process(self, upload_to_db: bool = True, on_progress: Optional[Any] = None) -> Dict[str, Any]:
         """Orquesta la extracción, enriquecimiento y carga."""
         import asyncio
         start_time = time.time()
         log_connector_status("SGPI-CI", "START", 0.0, details=f"Iniciando procesamiento del archivo {self.filename}")
+
+        def update_progress(msg: str, progress_val: int):
+            if on_progress:
+                try:
+                    on_progress(msg, progress_val)
+                except Exception as ex:
+                    logger.warning(f"Error in progress callback: {ex}")
+            logger.info(f"[{self.filename}] {msg} ({progress_val}%)")
+
+        update_progress("Analizando formato y estructura del archivo...", 15)
         
         # 1. Extracción (Parsers Heurísticos)
         try:
@@ -57,7 +68,7 @@ class EtlProcessor:
             )
             return {"error": f"Fallo al parsear el archivo: {e}"}
 
-        logger.info(f"[{self.filename}] Datos extraídos. Iniciando enriquecimiento RENACYT...")
+        update_progress("Archivo leído con éxito. Identificando investigadores...", 22)
 
         # 2. Enriquecimiento (Extraer nombres únicos y consultar Renacyt)
         unique_names = set()
@@ -78,8 +89,7 @@ class EtlProcessor:
         if not search_by_name:
             logger.warning(f"[{self.filename}] renacyt_connector no disponible. No se podrá enriquecer.")
 
-        # Obtener todos los investigadores registrados localmente para evitar búsquedas redundantes
-        logger.info(f"[{self.filename}] Cargando investigadores registrados localmente...")
+        update_progress(f"Se identificaron {len(unique_names)} investigadores únicos. Consultando padrón local...", 26)
         investigadores_db = await asyncio.to_thread(self.uploader.fetch_investigadores)
         
         # Instanciar el conector una sola vez y bajar el delay
@@ -275,12 +285,16 @@ class EtlProcessor:
             return match
 
 
-        for name in unique_names:
+        total_names = len(unique_names)
+        for index, name in enumerate(unique_names, 1):
             if not name or not search_by_name:
                 continue
             
             # Limpiar nombre para la búsqueda (títulos)
             search_name = re.sub(r'^(Dr\.|Mg\.|Mag\.|Ing\.|Lic\.)\s*', '', name, flags=re.IGNORECASE).strip()
+            
+            pct = 30 + int((index / total_names) * 45) if total_names > 0 else 75
+            update_progress(f"Buscando en RENACYT: {search_name} ({index}/{total_names})", pct)
             
             try:
                 match = await robust_renacyt_search(search_name)
@@ -324,12 +338,12 @@ class EtlProcessor:
                     "dato": name
                 })
 
-        logger.info(f"[{self.filename}] Enriquecimiento completo. {len(name_to_dni)} DNIs resueltos.")
+        update_progress(f"Búsqueda finalizada. Se resolvieron {len(name_to_dni)} investigadores con DNI.", 75)
 
         # ---------------------------------------------------------
         # MATCHING DE GRUPOS DE INVESTIGACIÓN (Fuzzy / Exacto)
         # ---------------------------------------------------------
-        logger.info(f"[{self.filename}] Obteniendo padrón de grupos para Foreign Keys...")
+        update_progress("Obteniendo padrón de grupos de investigación para validación...", 78)
         try:
             from rapidfuzz import process, fuzz
             has_rapidfuzz = True
@@ -384,6 +398,7 @@ class EtlProcessor:
             return None
 
         # 3. Ensamblaje de Modelos Finales
+        update_progress("Validando y relacionando registros de proyectos, publicaciones y tesis...", 83)
         proyectos_validos, publicaciones_validas, tesis_validas, grupos_validos = [], [], [], []
 
         # Proyectos
@@ -472,17 +487,22 @@ class EtlProcessor:
         # 4. Carga (Supabase)
         resultados_db = {}
         if upload_to_db:
-            logger.info(f"[{self.filename}] Cargando a BD...")
+            update_progress("Guardando cambios en la base de datos...", 90)
             if investigadores_validos:
-                resultados_db['investigadores'] = await asyncio.to_thread(self.uploader.upload, 'importar_ci_investigadores', investigadores_validos)
+                update_progress("Guardando nuevos investigadores y datos de RENACYT...", 92)
+                resultados_db['investigadores'] = await asyncio.to_thread(self.uploader.upload, 'importar_ci_investigadores', investigadores_validos, id_usuario=self.id_usuario)
             if proyectos_validos:
-                resultados_db['proyectos'] = await asyncio.to_thread(self.uploader.upload, 'importar_ci_proyectos', proyectos_validos)
+                update_progress("Guardando proyectos de investigación...", 94)
+                resultados_db['proyectos'] = await asyncio.to_thread(self.uploader.upload, 'importar_ci_proyectos', proyectos_validos, id_usuario=self.id_usuario)
             if grupos_validos:
-                resultados_db['grupos'] = await asyncio.to_thread(self.uploader.upload, 'importar_ci_grupos', grupos_validos)
+                update_progress("Guardando grupos de investigación...", 96)
+                resultados_db['grupos'] = await asyncio.to_thread(self.uploader.upload, 'importar_ci_grupos', grupos_validos, id_usuario=self.id_usuario)
             if publicaciones_validas:
-                resultados_db['publicaciones'] = await asyncio.to_thread(self.uploader.upload, 'importar_ci_publicaciones', publicaciones_validas)
+                update_progress("Guardando publicaciones científicas...", 98)
+                resultados_db['publicaciones'] = await asyncio.to_thread(self.uploader.upload, 'importar_ci_publicaciones', publicaciones_validas, id_usuario=self.id_usuario)
             if tesis_validas:
-                resultados_db['tesis'] = await asyncio.to_thread(self.uploader.upload, 'importar_ci_tesis', tesis_validas)
+                update_progress("Guardando tesis de grado y posgrado...", 99)
+                resultados_db['tesis'] = await asyncio.to_thread(self.uploader.upload, 'importar_ci_tesis', tesis_validas, id_usuario=self.id_usuario)
 
         duration = time.time() - start_time
         total_records = (
@@ -503,6 +523,7 @@ class EtlProcessor:
             details=f"Procesamiento finalizado para archivo: {self.filename}"
         )
 
+        update_progress("Procesamiento y persistencia finalizados correctamente.", 100)
         return {
             "archivo": self.filename,
             "entidades_extraidas": {

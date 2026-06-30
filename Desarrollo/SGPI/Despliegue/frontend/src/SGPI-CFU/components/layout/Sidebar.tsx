@@ -13,22 +13,8 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-// import { useAuth } from '../../lib/hooks/useAuth';
+import { useAuth } from '../../lib/hooks/useAuth';
 import type { UserRole } from '../../lib/types/auth';
-
-// ── Mock temporal de useAuth (sin backend) ───────────────────────────────────
-// TODO: reemplazar por useAuth real cuando el backend esté disponible
-function useMockAuth() {
-  return {
-    user: {
-      id: 'mock-1',
-      name: 'Ana Mendoza',
-      email: 'amendoza@unmsm.edu.pe',
-      role: 'admin' as UserRole,
-    },
-    logout: async () => { console.log('logout (mock)'); },
-  };
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Íconos SVG inline (outline, 18×18, stroke-1.75)
@@ -256,7 +242,7 @@ const NAV_ITEMS: NavItem[] = [
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { user } = useMockAuth();
+  const { user, logout } = useAuth();
 
   /** Filtra los items visibles según el rol del usuario */
   const visibleItems = NAV_ITEMS.filter((item) => {
@@ -274,8 +260,13 @@ export function Sidebar() {
     return decodedPath === item.href || decodedPath.startsWith(`${item.href}/`);
   };
 
-  const handleLogout = () => {
-    router.push('/auth/login');
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch (error) {
+      console.error('Error al cerrar sesión:', error);
+      router.push('/auth/login');
+    }
   };
 
   return (
@@ -328,7 +319,7 @@ export function Sidebar() {
                     group flex items-center gap-2.5
                     px-3 py-[9px] rounded-md
                     text-[13px] font-sans leading-5
-                    transition-colors duration-100
+                    transition-all duration-300 ease-out
                     ${isActive
                       ? 'bg-[#eef2ff] text-[#001631] font-bold border-r-[3px] border-[#001631]'
                       : 'text-[#475569] font-normal hover:bg-[#f1f5f9] hover:text-[#0f172a] border-r-[3px] border-transparent'
@@ -337,7 +328,7 @@ export function Sidebar() {
                 >
                   {/* Ícono */}
                   <span className={`
-                    flex-shrink-0 transition-colors duration-100 rounded-md p-0.5
+                    flex-shrink-0 transition-all duration-300 ease-out rounded-md p-0.5
                     ${isActive
                       ? 'text-[#001631] bg-[#dde5ff]'
                       : 'text-[#94a3b8] group-hover:text-[#475569]'
@@ -365,12 +356,12 @@ export function Sidebar() {
             text-[13px] font-sans font-normal leading-5
             text-[#64748b] hover:text-[#b91c1c] hover:bg-[#fef2f2]
             border-l-[3px] border-transparent pl-[9px]
-            transition-colors duration-100
+            transition-all duration-300 ease-out
           "
           aria-label="Cerrar sesión"
           type="button"
         >
-          <span className="flex-shrink-0 transition-colors duration-100">
+          <span className="flex-shrink-0 transition-all duration-300 ease-out">
             <LogoutIcon />
           </span>
           <span>Cerrar Sesión</span>

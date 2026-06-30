@@ -1,7 +1,7 @@
 import json
 import requests
 from decimal import Decimal
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sgpi_ci.config import settings, DEFAULT_CHUNK_SIZE
 
@@ -55,12 +55,12 @@ class SupabaseUploader:
             return []
 
     def upload(
-
         self,
         rpc_name: str,
         records: List[Dict[str, Any]],
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         quiet: bool = False,
+        id_usuario: Optional[str] = None,
     ) -> Dict[str, int]:
         """
         Envía registros validados a Supabase en batches mediante llamada RPC.
@@ -70,13 +70,14 @@ class SupabaseUploader:
             records:    Lista de dicts validados por Pydantic.
             chunk_size: Registros por llamada (default: 200).
             quiet:      Suprime mensajes de progreso si True.
+            id_usuario: ID del usuario (UUID) que ejecuta la importación.
 
         Returns:
             {'insertados': n, 'actualizados': n, 'fallidos': n}
 
         Raises:
             ConnectionError: [EX4] Si hay un error de red durante la carga.
-        """
+            """
         settings.validate()
 
         totals: Dict[str, int] = {"procesados": 0, "fallidos": 0}
@@ -105,10 +106,14 @@ class SupabaseUploader:
                     json.dumps(chunk, default=self._serialize)
                 )
 
+                body = {"payload": payload_json}
+                if id_usuario:
+                    body["id_usuario"] = id_usuario
+
                 response = requests.post(
                     url,
                     headers=headers,
-                    json={"payload": payload_json}
+                    json=body
                 )
                 
                 response.raise_for_status()

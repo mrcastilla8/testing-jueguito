@@ -81,7 +81,40 @@ export function ExportFlow({ context, result, onClose }: { context: string, resu
   let pdfData = [['Contexto', context], ['Estado', 'Generado']];
   let pdfFilters: Record<string, any> = {};
 
-  if (result) {
+  if (context.startsWith('ficha_grupo_') && result) {
+    pdfTitle = `Ficha Consolidada de Grupo`;
+    pdfSubtitle = result.name;
+    pdfFilters["Código Oficial"] = result.code;
+    pdfFilters["Fecha Registro"] = result.recognitionDate || result.createdAt;
+    
+    let estadoStr = "Pendiente Validar";
+    if (result.status === 'validado_active' || result.status === 'validado_activo') estadoStr = "Validado / Activo";
+    else if (result.status === 'validado_inactive' || result.status === 'validado_inactivo') estadoStr = "Validado / Inactivo";
+    pdfFilters["Estado"] = estadoStr;
+
+    pdfColumns = ["Concepto / Elemento", "Detalle / Información"];
+    
+    const activeProjectsCount = result.proyectosVinculados ? result.proyectosVinculados.filter((p: any) => p.estado === 'active').length : 0;
+    
+    pdfData = [
+      ["Código Oficial", result.code || "-"],
+      ["Nombre del Grupo", result.name || "-"],
+      ["Línea de Investigación Principal", result.researchLines ? result.researchLines.join(", ") : "-"],
+      ["Proyectos Activos", String(activeProjectsCount)],
+      ["Artículos (Scopus)", String(result.articulosScopus || 0)],
+      ["Tesis en Curso", String(result.tesisEnCurso || 0)],
+      ["<b>INTEGRANTES</b>", ""],
+      ...(result.miembros || []).map((m: any) => [
+        m.nombre || m.dni,
+        `${m.rol} - DNI: ${m.dni} - Incorporación: ${m.fechaIncorporacion || "-"}`
+      ]),
+      ["<b>PROYECTOS VINCULADOS</b>", ""],
+      ...(result.proyectosVinculados || []).map((p: any) => [
+        p.codigo || p.codigo_proyecto,
+        `${p.titulo || p.titulo_proyecto} (${p.convocatoria}) - Estado: ${p.estado === 'active' ? 'En ejecución' : p.estado === 'pending' ? 'Formulación' : p.estado === 'completed' ? 'Concluido' : 'Cancelado'}`
+      ])
+    ];
+  } else if (result) {
     pdfTitle = result.titulo || pdfTitle;
     pdfSubtitle = result.subtitulo || pdfSubtitle;
     
@@ -219,23 +252,31 @@ export function ExportFlow({ context, result, onClose }: { context: string, resu
       } else {
         url = `${API_URL}/api/v1/reports/export/excel`;
         
-        const validTypes = ["Carga No Lectiva", "Proyectos Activos", "Produccion Cientifica", "Resumen General"];
-        const finalTipo = validTypes.includes(context) ? context : "Resumen General";
-
-        if (result) {
+        if (context.startsWith('ficha_grupo_')) {
+          const groupId = context.replace('ficha_grupo_', '');
           payload = {
-            tipo_reporte: finalTipo,
-            anio_corte: (finalTipo === 'Produccion Cientifica' || finalTipo === 'Resumen General') ? undefined : result.params.anioFiscal,
-            periodo_corte: result.params.corte,
-            fecha_inicio_desde: result.params.fechaInicio || undefined,
-            fecha_fin_hasta: result.params.fechaFin || undefined,
-            departamento_academico: result.params.departamentos.length > 0 ? result.params.departamentos[0] : undefined,
-            grupo_investigacion: result.params.grupoInvestigacion || undefined
+            tipo_reporte: "Ficha Grupo",
+            grupo_investigacion: groupId
           };
         } else {
-          payload = {
-            tipo_reporte: finalTipo
-          };
+          const validTypes = ["Carga No Lectiva", "Proyectos Activos", "Produccion Cientifica", "Resumen General"];
+          const finalTipo = validTypes.includes(context) ? context : "Resumen General";
+
+          if (result) {
+            payload = {
+              tipo_reporte: finalTipo,
+              anio_corte: (finalTipo === 'Produccion Cientifica' || finalTipo === 'Resumen General') ? undefined : result.params.anioFiscal,
+              periodo_corte: result.params.corte,
+              fecha_inicio_desde: result.params.fechaInicio || undefined,
+              fecha_fin_hasta: result.params.fechaFin || undefined,
+              departamento_academico: result.params.departamentos.length > 0 ? result.params.departamentos[0] : undefined,
+              grupo_investigacion: result.params.grupoInvestigacion || undefined
+            };
+          } else {
+            payload = {
+              tipo_reporte: finalTipo
+            };
+          }
         }
       }
 

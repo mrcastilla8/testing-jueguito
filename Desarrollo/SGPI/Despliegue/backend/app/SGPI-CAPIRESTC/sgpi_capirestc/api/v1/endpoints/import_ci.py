@@ -6,8 +6,9 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional, Dict
 
-from fastapi import APIRouter, BackgroundTasks, File, UploadFile, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, File, UploadFile, HTTPException, status, Depends
 from pydantic import BaseModel
+from app.core.security import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -44,8 +45,24 @@ class ImportJobState:
         self.created    = 0             
         self.updated    = 0             
         self.error_msg: Optional[str] = None
+        self.api_renacyt_offline = False
         self.started_at = datetime.now(timezone.utc).isoformat()
         self.finished_at: Optional[str] = None
+        self.logs = [
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "message": "Archivo en cola de procesamiento...",
+                "progress": 0
+            }
+        ]
+
+    def add_log(self, message: str, progress: int):
+        self.progress = progress
+        self.logs.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "message": message,
+            "progress": progress
+        })
 
 _jobs: Dict[str, ImportJobState] = {}
 
@@ -56,7 +73,7 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 # ---------------------------------------------------------------------------
 # Tarea en Background
 # ---------------------------------------------------------------------------
-async def _run_sgpi_ci(job_id: str, file_path: str) -> None:
+async def _run_sgpi_ci(job_id: str, file_path: str, id_usuario: Optional[str] = None) -> None:
     """
     Ejecuta el pipeline de SGPI-CI de manera asíncrona usando EtlProcessor.
     Como EtlProcessor es síncrono y bloqueante, se corre en un hilo separado
@@ -67,29 +84,30 @@ async def _run_sgpi_ci(job_id: str, file_path: str) -> None:
         return
 
     job.status = "running"
-    job.progress = 10 # Iniciando procesamiento
+    job.add_log("Iniciando procesamiento del archivo...", 10)
 
     if EtlProcessor is None:
         job.status = "failed"
         job.error_msg = "Módulo SGPI-CI no encontrado o error de importación interna."
+        job.add_log("Error: Módulo SGPI-CI no disponible.", 10)
         return
 
     try:
         # EtlProcessor.process() es asíncrono nativo
-        processor = EtlProcessor(file_path=file_path)
+        processor = EtlProcessor(file_path=file_path, id_usuario=id_usuario)
 
-        # Simular avance mientras se resuelve (como EtlProcessor no reporta progreso
-        # internamente, marcamos un 50% fijo mientras esperamos que termine).
-        job.progress = 50 
+        def on_progress(msg: str, progress_val: int):
+            job.add_log(msg, progress_val)
         
-        resultado = await processor.process(upload_to_db=True)
+        resultado = await processor.process(upload_to_db=True, on_progress=on_progress)
 
         if "error" in resultado:
             job.status = "failed"
             job.error_msg = resultado["error"]
+            job.add_log(f"Error de procesamiento: {resultado['error']}", job.progress)
         else:
             job.status = "completed"
-            job.progress = 100
+            job.add_log("Procesamiento finalizado con éxito.", 100)
             
             # Extraer métricas reales de los resultados devueltos por SupabaseUploader
             # Resultados típicos devuelven la lista de diccionarios insertados
@@ -109,12 +127,20 @@ async def _run_sgpi_ci(job_id: str, file_path: str) -> None:
             job.errors = resultado.get("conflictos_inconsistencias", 0)
             job.processed = sum(resultado.get("entidades_extraidas", {}).values())
 
+            # Detectar si la API de RENACYT estuvo offline/caída
+            detalle_conflictos = resultado.get("detalle_conflictos", [])
+            for c in detalle_conflictos:
+                if c.get("tipo") == "ERROR_API_RENACYT":
+                    job.api_renacyt_offline = True
+                    break
+
             logger.info(f"Job {job_id} completado exitosamente: {job.created} creados, {job.errors} errores.")
 
     except Exception as e:
         logger.error(f"Excepción en pipeline SGPI-CI: {e}", exc_info=True)
         job.status = "failed"
         job.error_msg = f"Error interno en ETL: {str(e)}"
+        job.add_log(f"Error inesperado en importación: {str(e)}", job.progress)
     finally:
         job.finished_at = datetime.now(timezone.utc).isoformat()
         # Limpieza del archivo temporal
@@ -137,6 +163,7 @@ async def _run_sgpi_ci(job_id: str, file_path: str) -> None:
 async def upload_excel(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Recibe un archivo Excel, lo guarda en un directorio temporal y lanza
@@ -154,7 +181,8 @@ async def upload_excel(
     _jobs[job_id] = ImportJobState(job_id=job_id, filename=filename)
     
     # Lanzar pipeline
-    background_tasks.add_task(_run_sgpi_ci, job_id, file_path)
+    id_usuario = current_user.get("sub") if current_user else None
+    background_tasks.add_task(_run_sgpi_ci, job_id, file_path, id_usuario)
 
     return {
         "success": True,
@@ -180,6 +208,7 @@ async def get_import_status(job_id: str):
         "progress":  job.progress,
         "processed": job.processed,
         "errors":    job.errors,
+        "logs":      job.logs,
     }
 
     if job.status == "completed":
@@ -187,6 +216,7 @@ async def get_import_status(job_id: str):
             "created":  job.created,
             "updated":  job.updated,
             "errors":   job.errors,
+            "api_renacyt_offline": job.api_renacyt_offline,
         }
 
     if job.status == "failed" and job.error_msg:

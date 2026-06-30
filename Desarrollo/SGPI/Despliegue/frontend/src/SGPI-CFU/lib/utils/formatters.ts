@@ -405,3 +405,15 @@ export function formatEmail(email: string | null | undefined): string {
   return email;
 }
 
+/**
+ * Normaliza un texto para que sea insensible a acentos/tildes y mayúsculas.
+ *
+ * @param str - Cadena de texto a normalizar
+ * @returns Cadena normalizada sin tildes en minúsculas, o vacía si es nulo
+ */
+export function removeAccents(str: string | null | undefined): string {
+  if (!str) return '';
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+

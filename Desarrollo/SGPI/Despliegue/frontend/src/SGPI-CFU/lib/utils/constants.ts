@@ -19,8 +19,8 @@ export const API_BASE_URL =
 /** Prefijo de versión de la API */
 export const API_PREFIX = '/api/v1';
 
-/** Timeout por defecto para peticiones normales (5 segundos) */
-export const DEFAULT_TIMEOUT_MS = 5_000;
+/** Timeout por defecto para peticiones normales (15 segundos) */
+export const DEFAULT_TIMEOUT_MS = 15_000;
 
 /** Timeout para operaciones pesadas: importaciones, sync, reportes (10 minutos) */
 export const HEAVY_OPERATION_TIMEOUT_MS = 10 * 60 * 1_000;

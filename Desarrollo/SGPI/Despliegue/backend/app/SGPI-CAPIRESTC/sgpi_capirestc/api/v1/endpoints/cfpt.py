@@ -1,7 +1,7 @@
 import base64
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_
+from sqlalchemy import select, or_, and_, func
 from typing import List, Optional
 
 from app.db.session import get_db
@@ -46,14 +46,14 @@ async def list_producciones(
         )
         filters_pub = []
         if estado != 'todos':
-            filters_pub.append(Publicacion.estado_validacion.ilike(estado))
+            filters_pub.append(func.unaccent(Publicacion.estado_validacion).ilike(func.unaccent(estado)))
         if indexacion != 'todas':
-            filters_pub.append(Publicacion.fuente_origen.ilike(indexacion))
+            filters_pub.append(func.unaccent(Publicacion.fuente_origen).ilike(func.unaccent(indexacion)))
         if buscar:
             term = f"%{buscar}%"
             filters_pub.append(or_(
-                Publicacion.titulo_articulo.ilike(term),
-                Publicacion.doi_codigo.ilike(term)
+                func.unaccent(Publicacion.titulo_articulo).ilike(func.unaccent(term)),
+                func.unaccent(Publicacion.doi_codigo).ilike(func.unaccent(term))
             ))
         if filters_pub:
             stmt_pub = stmt_pub.where(and_(*filters_pub))
@@ -91,14 +91,14 @@ async def list_producciones(
         )
         filters_tes = []
         if estado != 'todos':
-            filters_tes.append(Tesis.estado_validacion.ilike(estado))
+            filters_tes.append(func.unaccent(Tesis.estado_validacion).ilike(func.unaccent(estado)))
         if indexacion != 'todas':
-            filters_tes.append(Tesis.fuente_origen.ilike(indexacion))
+            filters_tes.append(func.unaccent(Tesis.fuente_origen).ilike(func.unaccent(indexacion)))
         if buscar:
             term = f"%{buscar}%"
             filters_tes.append(or_(
-                Tesis.titulo_tesis.ilike(term),
-                Tesis.autor_estudiante_texto.ilike(term)
+                func.unaccent(Tesis.titulo_tesis).ilike(func.unaccent(term)),
+                func.unaccent(Tesis.autor_estudiante_texto).ilike(func.unaccent(term))
             ))
         if filters_tes:
             stmt_tes = stmt_tes.where(and_(*filters_tes))
@@ -267,8 +267,8 @@ async def list_grupos_investigacion(
     if query:
         term = f"%{query}%"
         stmt = stmt.where(or_(
-            GrupoInvestigacion.nombre_grupo.ilike(term),
-            GrupoInvestigacion.siglas.ilike(term)
+            func.unaccent(GrupoInvestigacion.nombre_grupo).ilike(func.unaccent(term)),
+            func.unaccent(GrupoInvestigacion.siglas).ilike(func.unaccent(term))
         ))
     res = await db.execute(stmt)
     resultados = []
